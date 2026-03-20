@@ -300,6 +300,20 @@ body.tv .htitle{font-size:46px}
 body.tv .dtitle{font-size:54px}
 body.tv .stitle{font-size:22px}
 body.tv .pc{width:175px}
+body.tv{cursor:none}
+body.tv .playerwrap.on{cursor:none}
+body.tv .playerwrap.showui{cursor:default}
+
+/* TV focus ring — green glow on focused element */
+.foc{
+  outline:3px solid var(--green)!important;
+  outline-offset:3px!important;
+  box-shadow:0 0 0 6px rgba(22,163,74,0.25)!important;
+  transform:scale(1.05);
+  transition:transform .15s,box-shadow .15s;
+  z-index:10;
+  position:relative;
+}
 
 ::-webkit-scrollbar{width:3px;height:3px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -533,8 +547,12 @@ const IMG  = 'https://image.tmdb.org/t/p/';
 let favs     = JSON.parse(localStorage.getItem('nf_f')||'[]');
 let heroArr  = [], heroI = 0, heroT = null;
 let curD     = null, curSeason = 1;
-const TV     = location.search.includes('tv=1')||
-               /Android TV|SMART-TV|Tizen|WebOS|HbbTV/.test(navigator.userAgent);
+// Better TV detection
+const TV = location.search.includes('tv=1') ||
+  /Android TV|SMART-TV|Tizen|WebOS|HbbTV|TV Safari|PhilipsTV|BRAVIA|NetCast/.test(navigator.userAgent) ||
+  (navigator.userAgent.includes('Android') && !navigator.userAgent.includes('Mobile')) ||
+  window.matchMedia('(pointer:none)').matches;
+
 if(TV) document.body.classList.add('tv');
 
 // ── API ──────────────────────────────────────────
@@ -879,13 +897,15 @@ function showPlayerUI(){
 }
 function play(id,type,title,season=1,ep=1){
   const src=type==='movie'
-    ?`https://autoembed.co/movie/tmdb/${id}`
-    :`https://autoembed.co/tv/tmdb/${id}-${season}-${ep}`;
+    ?`https://moviesapi.to/movie/${id}`
+    :`https://moviesapi.to/tv/${id}-${season}-${ep}`;
   document.getElementById('ptitle').textContent=title;
   document.getElementById('piframe').src=src;
   const pw=document.getElementById('playerwrap');
   pw.classList.add('on');
   showPlayerUI();
+  // Auto fullscreen on TV
+  if(TV){ try{ pw.requestFullscreen?.(); }catch(e){} }
 }
 document.getElementById('playerwrap').addEventListener('mousemove',showPlayerUI);
 document.getElementById('playerwrap').addEventListener('touchstart',showPlayerUI);
@@ -932,6 +952,12 @@ function hideOSK(){document.getElementById('osk').classList.remove('on');}
 
 // ── TV D-PAD ──────────────────────────────────────
 if(TV){
+  // Set initial focus
+  setTimeout(()=>{
+    const first=document.querySelector('.navbtn');
+    if(first) first.classList.add('foc');
+  },2600);
+
   document.addEventListener('keydown',e=>{
     if(['Escape','GoBack','Backspace'].includes(e.key)){
       e.preventDefault();
@@ -940,21 +966,46 @@ if(TV){
       else{history.back();}
       return;
     }
-    const SEL='.pg.on .pc,.pg.on .fc,.pg.on .cattile,.pg.on .ratcard,.pg.on .wbtn,.pg.on .bbtn,.pg.on .epbtn,.pg.on .epcard,.navbtn,.osk.on .key';
-    const items=[...document.querySelectorAll(SEL)];
-    const cur=document.querySelector('.foc');
-    let idx=items.indexOf(cur);
-    if(e.key==='Enter'||e.key===' '){e.preventDefault();cur?.click();return;}
-    if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;
+    if(e.key==='Enter'||e.key===' '){
+      e.preventDefault();
+      document.querySelector('.foc')?.click();
+      return;
+    }
+    if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) return;
     e.preventDefault();
-    let next=idx;
-    if(e.key==='ArrowRight')next=Math.min(items.length-1,idx+1);
-    if(e.key==='ArrowLeft')next=Math.max(0,idx-1);
-    if(e.key==='ArrowDown')next=Math.min(items.length-1,idx+6);
-    if(e.key==='ArrowUp')next=Math.max(0,idx-6);
-    cur?.classList.remove('foc');
-    items[idx===-1?0:next]?.classList.add('foc');
-    items[idx===-1?0:next]?.scrollIntoView({behavior:'smooth',block:'nearest'});
+
+    const SEL='.pg.on .pc,.pg.on .fc,.pg.on .cattile,.pg.on .ratcard,.pg.on .wbtn,.pg.on .bbtn,.pg.on .epbtn,.pg.on .epcard,.navbtn,.osk.on .key';
+    const items=[...document.querySelectorAll(SEL)].filter(el=>el.offsetParent!==null);
+    const cur=document.querySelector('.foc');
+
+    if(!cur){
+      items[0]?.classList.add('foc');
+      items[0]?.scrollIntoView({behavior:'smooth',block:'nearest'});
+      return;
+    }
+
+    const cr=cur.getBoundingClientRect();
+    const cx=cr.left+cr.width/2, cy=cr.top+cr.height/2;
+
+    let best=null, bestScore=Infinity;
+    items.forEach(el=>{
+      if(el===cur) return;
+      const r=el.getBoundingClientRect();
+      const ex=r.left+r.width/2, ey=r.top+r.height/2;
+      const dx=ex-cx, dy=ey-cy;
+      let inDir=false, score=0;
+      if(e.key==='ArrowRight'&&dx>10){inDir=true;score=dx+Math.abs(dy)*2.5;}
+      if(e.key==='ArrowLeft' &&dx<-10){inDir=true;score=-dx+Math.abs(dy)*2.5;}
+      if(e.key==='ArrowDown' &&dy>10){inDir=true;score=dy+Math.abs(dx)*2.5;}
+      if(e.key==='ArrowUp'   &&dy<-10){inDir=true;score=-dy+Math.abs(dx)*2.5;}
+      if(inDir&&score<bestScore){bestScore=score;best=el;}
+    });
+
+    if(best){
+      cur.classList.remove('foc');
+      best.classList.add('foc');
+      best.scrollIntoView({behavior:'smooth',block:'nearest'});
+    }
   });
 }
 
